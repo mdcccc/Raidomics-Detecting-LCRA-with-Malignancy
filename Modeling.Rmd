@@ -1,0 +1,341 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+# 1 ICC
+```{r}
+rm(list = ls())
+
+library(openxlsx)
+library(readr)
+library(irr)
+
+feature_1 = read.xlsx("E:/Data/Data_Excel/RadiomicsFeature_CV_ICC.xlsx",sheet=1 )
+feature_2 = read.xlsx("E:/Data/Data_Excel/RadiomicsFeature_CV_ICC.xlsx",sheet=2 )
+
+len = 1258
+icc_val <- vector(length=len)
+thr <- 0.8
+icc_val<-vector(length=len)
+for (i in 36:len){
+  rating <- cbind(as.numeric(feature_1[,i]),as.numeric(feature_2[,i]))
+  icc_vals <- icc(rating, 
+                 model='oneway', type='agreement', unit='single',
+                 r0=0, conf.level=0.95)
+  icc_val[i] <- icc_vals$value
+ 
+}
+index <- which(icc_val>thr)
+length(index)
+
+
+dim(icc_val)=c(1,len)
+icc_val_save <- icc_val
+icc_val_save [icc_val_save < thr] <- 0
+icc_val_save [icc_val_save >= thr] <- 1
+
+#write.csv(icc_val_save,file = "E:/Data/Data_Excel/ICC_value.csv",row.names = F)
+
+
+```
+
+
+```{r}
+
+rm(list = ls())
+
+```
+
+```{r}
+
+library(openxlsx)
+library(caret)
+library(glmnet)
+library(MASS)
+library(ggplot2)
+library(survival)
+library(Hmisc)
+library(ROSE)
+
+```
+
+# 1 load data
+```{r}
+
+Feature_All <- read.xlsx("E:/Data/Data_Excel/RadiomicsFeature_CV.xlsx", sheet=1)
+
+ICC_value <- read.xlsx("E:/Data/Data_Excel/ICC_value.xlsx", sheet=1)
+Index_ICC <- which(ICC_value == 1)
+
+Feature_All <- Feature_All[, Index_ICC]
+
+# fac <- c(1:4)
+# Feature_All[fac] <- lapply(Feature_All[fac], as.factor)
+
+nume <- c(1:length(Feature_All))
+Feature_All[nume] <- lapply(Feature_All[nume], as.numeric)
+#Feature_All <- Feature_All[, -c(65:463)]
+
+class <- Feature_All[, c(1:4)]
+
+```
+
+
+# 2 split the data
+```{r}
+
+set.seed("895") 
+mydata <- Feature_All
+
+aln <- 809
+ext <- 146
+data_ext <- mydata[c((aln+1-ext):aln),]
+
+data_int <- mydata[-c((aln+1-ext):aln),]
+
+index_split <- createDataPartition(y=data_int$class, p=0.7, list=F)
+
+data_train <- data_int[index_split, ]
+data_test <- data_int[-index_split, ]
+
+class_train <- data_int[index_split, 3]
+class_test <- data_int[-index_split, 3]
+
+
+```
+
+# 3 scale
+```{r}
+library(caret)
+
+data_tr <- data_train[,-c(1:4)]
+
+stand_scale <- preProcess(data_tr)  
+#stand_scale <- preProcess(data_tr, method = "range")   
+data_al <- Feature_All[,-c(1:4)]
+data_al <- predict(stand_scale, data_al)
+
+
+###
+Feature_All <- cbind(class, data_al)
+Feature_tmp <- Feature_All
+
+data_ext <- Feature_All[c((aln+1-ext):aln),]
+data_int <- Feature_All[-c((aln+1-ext):aln),]
+
+data_train <- data_int[index_split, ]
+data_test <- data_int[-index_split, ]
+
+```
+
+# 4 log rank test
+```{r}
+
+mydata <- data_train
+
+patientnum <-nrow(mydata)
+number <- length(mydata)   
+
+thr <- 0.05
+testresult<-vector(length=number)
+
+for (i in 5:number){
+  tmpresult <- wilcox.test(as.numeric(mydata[,i])~as.numeric(mydata[,3]),     data=mydata)
+  testresult[i] <- tmpresult$p.value
+}
+
+Index_logrank <- which(testresult < thr)
+length(Index_logrank)
+
+####
+Feature_tmp <- Feature_All[, Index_logrank]
+
+data_ext <- Feature_tmp[c((aln+1-ext):aln),]
+data_int <- Feature_tmp[-c((aln+1-ext):aln),]
+
+data_train <- data_int[index_split, ]
+data_test <- data_int[-index_split, ]
+
+len1 <- length(data_train)
+ 
+```
+
+
+
+# 5 LASSO
+```{r}
+
+set.seed("65")
+
+tmp_y <- data_train$class
+tmp_x <- data_train[, c(5:len1)]
+
+
+glm_cv <- cv.glmnet(data.matrix(tmp_x), tmp_y, family="binomial", type.measure = "auc", 
+                    nlambda=30, alpha=1, standardize=TRUE, nfolds = 5)
+plot(glm_cv, cex.lab = 1.5, lwd=20)
+glm_cv
+coef(glm_cv, s=glm_cv$lambda.min)
+
+#coef_matrix <- as.matrix(coef(glm_cv, s=glm_cv$lambda.min))
+coef_matrix <- as.matrix(coef(glm_cv, s=glm_cv$lambda.1se))
+coef_matrix[coef_matrix == 0] <- NA
+coef_matrix <- na.omit(coef_matrix)
+coef_matrix <- as.data.frame(t(coef_matrix))
+coef_matrix <- na.omit(coef_matrix)
+coef_matrix <- coef_matrix[-1]
+
+feature_names <- colnames(coef_matrix )
+length(feature_names)
+
+
+feature_names
+
+```
+
+
+```{r}
+
+Feature_tmp <- Feature_All[ ,feature_names]
+colnames(Feature_tmp)
+
+Feature_tmp <- cbind(class, Feature_tmp)
+
+
+data_ext <- Feature_tmp[c((aln+1-ext):aln),]
+data_int <- Feature_tmp[-c((aln+1-ext):aln),]
+
+data_train <- data_int[index_split, ]
+data_test <- data_int[-index_split, ]
+len2 <- length(data_train)
+len2
+
+
+```
+
+
+
+
+
+# 3.1 logist regression
+```{r}
+library(rms)
+library(pROC)
+library(ggplot2)
+#library(cutoff)
+
+#### train
+mydata <- data_train[, c(3,5:len2)]
+
+model_glm <- glm(class~., data = mydata, family = 'binomial')
+summary(model_glm)
+
+anova(object = model_glm, test = "Chisq")
+
+Feature_All$pred <- predict(model_glm, newdata = Feature_All, type = 'response')
+Feature_All$predc <- ifelse(Feature_All$pred >= 0.5, 1, 0)
+
+data_ext <- Feature_All[c((aln+1-ext):aln),]
+data_int <- Feature_All[-c((aln+1-ext):aln),]
+
+data_train <- data_int[index_split, ]
+data_test <- data_int[-index_split, ]
+
+
+## data_train
+mydata <- data_train
+
+confusionMatrix(as.factor(mydata$predc),as.factor(mydata$class),positive = '1')
+val.prob(mydata$pred, mydata$class)
+cal_train <- val.prob(mydata$pred, mydata$class)
+roc1 <- roc(mydata$class, mydata$pred)
+
+ggroc1 <- ggroc(roc1,legacy.axes = TRUE)
+windowsFonts(A=windowsFont("Times New Roman")) 
+ggroc1 <- ggroc1 + theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(legend.position=c(0.85,0.20)) +  
+  theme(legend.text=element_text(size=14, face="plain")) +  
+  theme(legend.background=element_rect(fill="white", colour="black"))+ 
+  theme(axis.title=element_text(size=16, face="bold", family = "A")) +
+  theme(axis.text=element_text(size=14, face="bold", family = "A")) +
+  annotate("text", x=0.6, y=0.85, label="AUC = 0.825",size=5, fontface="bold", family = "A") 
+ggroc1
+
+## data_test
+mydata <- data_test
+confusionMatrix(as.factor(mydata$predc),as.factor(mydata$class),positive = '1')
+
+val.prob(mydata$pred, mydata$class)
+cal_int <- val.prob(mydata$pred, mydata$class)
+roc1 <- roc(mydata$class, mydata$pred)
+
+ggroc1 <- ggroc(roc1,legacy.axes = TRUE)
+windowsFonts(A=windowsFont("Times New Roman")) 
+ggroc1 <- ggroc1 + theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(legend.position=c(0.85,0.20)) +  
+  theme(legend.text=element_text(size=14, face="plain")) +  
+  theme(legend.background=element_rect(fill="white", colour="black"))+  
+  theme(axis.title=element_text(size=16, face="bold", family = "A")) +  
+  theme(axis.text=element_text(size=14, face="bold", family = "A")) + 
+  annotate("text", x=0.6, y=0.85, label="AUC = 0.801",size=5, fontface="bold", family = "A") 
+ggroc1
+
+
+## data_ext
+mydata <- data_ext
+confusionMatrix(as.factor(mydata$predc),as.factor(mydata$class),positive = '1')
+
+val.prob(mydata$pred, mydata$class)
+cal_ext <- val.prob(mydata$pred, mydata$class)
+roc1 <- roc(mydata$class, mydata$pred)
+
+ggroc1 <- ggroc(roc1,legacy.axes = TRUE)
+windowsFonts(A=windowsFont("Times New Roman")) 
+ggroc1 <- ggroc1 + theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(legend.position=c(0.85,0.20)) + 
+  theme(legend.text=element_text(size=14, face="plain")) + 
+  theme(legend.background=element_rect(fill="white", colour="black"))+
+  theme(axis.title=element_text(size=16, face="bold", family = "A")) + 
+  theme(axis.text=element_text(size=14, face="bold", family = "A")) + 
+  annotate("text", x=0.6, y=0.6, label="AUC = 0.825",size=5, fontface="bold", family = "A") 
+ggroc1
+
+
+showtext_auto(enable=T)
+pdf("Figure_cal.pdf",width=6,height=6)
+mydata <- data_train
+val.prob(mydata$pred, mydata$class)
+
+mydata <- data_int
+val.prob(mydata$pred, mydata$class)
+
+mydata <- data_ext
+val.prob(mydata$pred, mydata$class)
+
+while (!is.null(dev.list())) dev.off() 
+showtext_auto(enable=F)
+
+
+```
+
+# save
+```{r}
+
+data_test$group <- "test"
+data_train$group <- "train"
+data_ext$group <- "ext"
+
+feature <- rbind(data_test, data_train, data_ext)
+write.xlsx(feature, "E:/Data/Data_Excel/RadiomicsFeature_CV_Final.xlsx")
+
+```
+
+
+
+
+
+
+

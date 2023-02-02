@@ -1,0 +1,274 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+rm(list = ls())
+
+```
+
+```{r}
+
+library(openxlsx)
+library(caret)
+library(glmnet)
+library(MASS)
+library(ggplot2)
+library(survival)
+library(Hmisc)
+library(ROSE)
+
+```
+
+# 1 load data
+```{r}
+Feature_All <- read.xlsx("F:/Data/Data_Excel/Adenoma.xlsx", sheet=2)
+
+nume <- c("age", "pred","low","mid","high","pred_train","pred_test","pred_ext")
+Feature_All[nume] <- lapply(Feature_All[nume], as.numeric)
+
+nume <- c(20:32)
+Feature_All[nume] <- lapply(Feature_All[nume], as.numeric)
+
+fac <- c('surgery', "location")
+Feature_All[fac] <- lapply(Feature_All[fac], as.factor)
+Feature_All$predc <- ifelse(Feature_All$pred >= 0.5, 1,0)
+```
+
+# 2 two tables and kappa
+```{r}
+library(compareGroups)
+
+
+mydata <- Feature_All[ , c(10:27)]
+
+res_tab_1 <- descrTable(group~., data = mydata, show.all = TRUE, digits = 2, method =  NA)
+res_tab_1
+#export2word(res_tab_1, file = "F:/Data/Data_Excel/group.docx")
+
+res_tab_2 <- descrTable(difficult~., data = mydata, show.all = TRUE, digits = 2, method =  NA)
+res_tab_2
+#export2word(res_tab_2, file = "F:/Data/Data_Excel/difficult.docx")
+
+library(irr)
+kap <- c("rad1", "rad2")
+kappa2(mydata[,kap],'unweight')
+```
+
+
+# 2 accuracy_biopsy rad
+```{r}
+
+diag <- c("biopsy","rad1", "rad2", "rad3", "rad4", "rad5", "rad6","low", "mid", "high")
+
+mydata <- Feature_All[ , c(10:27)]
+mydata$low <- ifelse(mydata$low >= 0.5, 1,0)
+mydata$mid <- ifelse(mydata$mid >= 0.5, 1,0)
+mydata$high <- ifelse(mydata$high >= 0.5, 1,0)
+
+a <- lapply(diag, function(x){
+  tmp <- confusionMatrix(as.factor(mydata[,c(x)]),as.factor(mydata$surgery),positive = '1')
+  doct <- x
+  acc <- signif(tmp[["overall"]][["Accuracy"]], digits=3)
+  blacc <- signif(tmp[["byClass"]][["Balanced Accuracy"]], digits=3)
+  sen <- signif(tmp[["byClass"]][["Sensitivity"]], digits=3)
+  spe <- signif(tmp[["byClass"]][["Specificity"]], digits=3)
+  ppv <- signif(tmp[["byClass"]][["Pos Pred Value"]], digits=3)
+  npv <- signif(tmp[["byClass"]][["Neg Pred Value"]], digits=3)
+  res <- c(doct,acc, blacc,sen, spe,ppv,npv)
+  return(res)
+})
+acc_all <- as.data.frame(t(as.data.frame(a, check.names = TRUE)))
+names(acc_all) <- c("all_doct", "all_acc", "all_blacc","all_sen", "all_spe", "all_ppv", "all_npv")
+
+mydata <- Feature_All[Feature_All$difficult == 1 , c(10:27)]
+mydata$low <- ifelse(mydata$low >= 0.5, 1,0)
+mydata$mid <- ifelse(mydata$mid >= 0.5, 1,0)
+mydata$high <- ifelse(mydata$high >= 0.5, 1,0)
+a <- lapply(diag, function(x){
+  tmp <- confusionMatrix(as.factor(mydata[,c(x)]),as.factor(mydata$surgery),positive = '1')
+  doct <- x
+  acc <- signif(tmp[["overall"]][["Accuracy"]], digits=3)
+  blacc <- signif(tmp[["byClass"]][["Balanced Accuracy"]], digits=3)
+  sen <- signif(tmp[["byClass"]][["Sensitivity"]], digits=3)
+  spe <- signif(tmp[["byClass"]][["Specificity"]], digits=3)
+  ppv <- signif(tmp[["byClass"]][["Pos Pred Value"]], digits=3)
+  npv <- signif(tmp[["byClass"]][["Neg Pred Value"]], digits=3)
+  res <- c(doct,acc, blacc,sen, spe,ppv,npv)
+  return(res)
+})
+acc_diff <- as.data.frame(t(as.data.frame(a, check.names = TRUE)))
+names(acc_diff) <- c("diff_doct", "diff_acc", "diff_blacc", "diff_sen", "diff_spe", "diff_ppv", "diff_npv")
+
+
+mydata <- Feature_All[Feature_All$difficult == 0 , c(10:27)]
+mydata$low <- ifelse(mydata$low >= 0.5, 1,0)
+mydata$mid <- ifelse(mydata$mid >= 0.5, 1,0)
+mydata$high <- ifelse(mydata$high >= 0.5, 1,0)
+a <- lapply(diag, function(x){
+  tmp <- confusionMatrix(as.factor(mydata[,c(x)]),as.factor(mydata$surgery),positive = '1')
+  doct <- x
+  acc <- signif(tmp[["overall"]][["Accuracy"]], digits=3)
+  blacc <- signif(tmp[["byClass"]][["Balanced Accuracy"]], digits=3)
+  sen <- signif(tmp[["byClass"]][["Sensitivity"]], digits=3)
+  spe <- signif(tmp[["byClass"]][["Specificity"]], digits=3)
+  ppv <- signif(tmp[["byClass"]][["Pos Pred Value"]], digits=3)
+  npv <- signif(tmp[["byClass"]][["Neg Pred Value"]], digits=3)
+  res <- c(doct,acc, blacc,sen, spe,ppv,npv)
+  return(res)
+})
+acc_norm <- as.data.frame(t(as.data.frame(a, check.names = TRUE)))
+names(acc_norm) <- c("norm_doct", "norm_acc", "norm_blacc", "norm_sen", "norm_spe", "norm_ppv", "norm_npv")
+
+a <- cbind(acc_all, acc_diff, acc_norm)
+
+write.xlsx(a, file = "F:/Data/Data_Excel/acc.xlsx")
+
+```
+
+# 3 accuracy_predc
+```{r}
+diag <- c("predc")
+
+mydata <- Feature_All[ , c(10:27)]
+mydata <- mydata[mydata$group == "ext", ]#
+a <- lapply(diag, function(x){
+  tmp <- confusionMatrix(as.factor(mydata[,c(x)]),as.factor(mydata$surgery),positive = '1')
+  doct <- x
+  acc <- signif(tmp[["overall"]][["Accuracy"]], digits=3)
+  blacc <- signif(tmp[["byClass"]][["Balanced Accuracy"]], digits=3)
+  sen <- signif(tmp[["byClass"]][["Sensitivity"]], digits=3)
+  spe <- signif(tmp[["byClass"]][["Specificity"]], digits=3)
+  ppv <- signif(tmp[["byClass"]][["Pos Pred Value"]], digits=3)
+  npv <- signif(tmp[["byClass"]][["Neg Pred Value"]], digits=3)
+  res <- c(doct,acc, blacc,sen, spe,ppv,npv)
+  return(res)
+})
+acc_all <- as.data.frame(t(as.data.frame(a, check.names = TRUE)))
+names(acc_all) <- c("all_doct", "all_acc", "all_blacc","all_sen", "all_spe", "all_ppv", "all_npv")
+
+mydata <- Feature_All[Feature_All$difficult == 1 , c(10:27)]
+mydata <- mydata[mydata$group == "ext", ]#
+a <- lapply(diag, function(x){
+  tmp <- confusionMatrix(as.factor(mydata[,c(x)]),as.factor(mydata$surgery),positive = '1')
+  doct <- x
+  acc <- signif(tmp[["overall"]][["Accuracy"]], digits=3)
+  blacc <- signif(tmp[["byClass"]][["Balanced Accuracy"]], digits=3)
+  sen <- signif(tmp[["byClass"]][["Sensitivity"]], digits=3)
+  spe <- signif(tmp[["byClass"]][["Specificity"]], digits=3)
+  ppv <- signif(tmp[["byClass"]][["Pos Pred Value"]], digits=3)
+  npv <- signif(tmp[["byClass"]][["Neg Pred Value"]], digits=3)
+  res <- c(doct,acc, blacc,sen, spe,ppv,npv)
+  return(res)
+})
+acc_diff <- as.data.frame(t(as.data.frame(a, check.names = TRUE)))
+names(acc_diff) <- c("diff_doct", "diff_acc", "diff_blacc", "diff_sen", "diff_spe", "diff_ppv", "diff_npv")
+
+
+mydata <- Feature_All[Feature_All$difficult == 0 , c(10:27)]
+mydata <- mydata[mydata$group == "ext", ]#
+a <- lapply(diag, function(x){
+  tmp <- confusionMatrix(as.factor(mydata[,c(x)]),as.factor(mydata$surgery),positive = '1')
+  doct <- x
+  acc <- signif(tmp[["overall"]][["Accuracy"]], digits=3)
+  blacc <- signif(tmp[["byClass"]][["Balanced Accuracy"]], digits=3)
+  sen <- signif(tmp[["byClass"]][["Sensitivity"]], digits=3)
+  spe <- signif(tmp[["byClass"]][["Specificity"]], digits=3)
+  ppv <- signif(tmp[["byClass"]][["Pos Pred Value"]], digits=3)
+  npv <- signif(tmp[["byClass"]][["Neg Pred Value"]], digits=3)
+  res <- c(doct,acc, blacc,sen, spe,ppv,npv)
+  return(res)
+})
+acc_norm <- as.data.frame(t(as.data.frame(a, check.names = TRUE)))
+names(acc_norm) <- c("norm_doct", "norm_acc", "norm_blacc", "norm_sen", "norm_spe", "norm_ppv", "norm_npv")
+
+a <- cbind(acc_all, acc_diff, acc_norm)
+
+write.xlsx(a, file = "F:/Data/Data_Excel/acc_ext.xlsx")  #
+```
+
+
+# 4 AUC
+```{r}
+
+library(pROC)
+library(ggplot2)
+
+# radiomics
+
+diag <- c("train", "test", "ext")
+diag <- c("low", "mid", "high")
+
+mydata <- Feature_All[ , c(10:27)]
+a <- lapply(diag, function(x){
+  doct <- x
+  tmp_data <- mydata[mydata$group == c(x), ]
+  tmp <- roc(surgery~pred, data = tmp_data,levels =c(0,1), direction ="<")
+  auc_tmp <- signif(tmp[["auc"]], digits=3)
+  res <- c(doct,auc_tmp)
+  return(res)
+})
+auc_all <- as.data.frame(t(as.data.frame(a, check.names = TRUE)))
+
+
+mydata <- Feature_All[ , c(10:27)]
+mydata <- mydata[mydata$difficult == 1 , ]
+a <- lapply(diag, function(x){
+  doct <- x
+  tmp_data <- mydata[mydata$group == c(x), ]
+  tmp <- roc(surgery~pred, data = tmp_data,levels =c(0,1), direction ="<")
+  auc_tmp <- signif(tmp[["auc"]], digits=3)
+  res <- c(doct,auc_tmp)
+  return(res)
+})
+auc_diff <- as.data.frame(t(as.data.frame(a, check.names = TRUE)))
+
+mydata <- Feature_All[ , c(10:27)]
+mydata <- mydata[mydata$difficult == 0 , ]
+a <- lapply(diag, function(x){
+  doct <- x
+  tmp_data <- mydata[mydata$group == c(x), ]
+  tmp <- roc(surgery~pred, data = tmp_data,levels =c(0,1), direction ="<")
+  auc_tmp <- signif(tmp[["auc"]], digits=3)
+  res <- c(doct,auc_tmp)
+  return(res)
+})
+auc_norm <- as.data.frame(t(as.data.frame(a, check.names = TRUE)))
+
+a <- cbind(auc_all, auc_diff, auc_norm)
+write.xlsx(a, file = "F:/Data/Data_Excel/auc_predc.xlsx")  #
+
+```
+
+
+# kappa
+```{r}
+library(irr)
+a <- data.frame()
+
+mydata <- Feature_All
+kap_low <- kappa2(mydata[,c("rad1", "rad2")],"unweight")[["value"]]
+kap_mid <- kappa2(mydata[,c("rad3", "rad4")],"unweight")[["value"]]
+kap_high <- kappa2(mydata[,c("rad5", "rad6")],"unweight")[["value"]]
+
+mydata <- Feature_All[Feature_All$difficult ==0, ]
+kap_low <- kappa2(mydata[,c("rad1", "rad2")],"unweight")[["value"]]
+kap_mid <- kappa2(mydata[,c("rad3", "rad4")],"unweight")[["value"]]
+kap_high <- kappa2(mydata[,c("rad5", "rad6")],"unweight")[["value"]]
+
+mydata <- Feature_All[Feature_All$difficult ==1, ]
+kap_low <- kappa2(mydata[,c("rad1", "rad2")],"unweight")[["value"]]
+kap_mid <- kappa2(mydata[,c("rad3", "rad4")],"unweight")[["value"]]
+kap_high <- kappa2(mydata[,c("rad5", "rad6")],"unweight")[["value"]]
+
+
+```
+
+
+
+
+
+
+
